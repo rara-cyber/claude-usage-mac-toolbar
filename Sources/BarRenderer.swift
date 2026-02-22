@@ -180,6 +180,69 @@ struct BarRenderer {
 
     // MARK: - Private
 
+    /// A simple view for displaying a usage bar inside an NSMenuItem.
+    class UsageBarMenuView: NSView {
+        private let titleLabel: NSTextField
+        private let pctLabel: NSTextField
+        private var percentage: Double = 0
+
+        init(title: String) {
+            titleLabel = NSTextField(labelWithString: title)
+            pctLabel = NSTextField(labelWithString: "—")
+            super.init(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+
+            titleLabel.font = NSFont.menuFont(ofSize: 13)
+            titleLabel.textColor = .labelColor
+            addSubview(titleLabel)
+
+            pctLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+            pctLabel.textColor = .secondaryLabelColor
+            pctLabel.alignment = .right
+            addSubview(pctLabel)
+        }
+
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func layout() {
+            super.layout()
+            let h = bounds.height
+            titleLabel.sizeToFit()
+            let labelH = titleLabel.frame.height
+            let y = (h - labelH) / 2
+            titleLabel.frame = NSRect(x: 14, y: y, width: 52, height: labelH)
+            pctLabel.frame = NSRect(x: 160, y: y, width: 34, height: labelH)
+        }
+
+        func update(percentage: Double) {
+            self.percentage = max(0, min(100, percentage))
+            pctLabel.stringValue = "\(Int(self.percentage.rounded()))%"
+            needsDisplay = true
+        }
+
+        override func draw(_ dirtyRect: NSRect) {
+            super.draw(dirtyRect)
+
+            let barX: CGFloat = 72
+            let barW: CGFloat = 82
+            let barH: CGFloat = 6
+            let barY = (bounds.height - barH) / 2
+            let r: CGFloat = 3
+
+            // Track
+            NSColor(white: 0.5, alpha: 0.2).setFill()
+            NSBezierPath(roundedRect: NSRect(x: barX, y: barY, width: barW, height: barH),
+                         xRadius: r, yRadius: r).fill()
+
+            // Fill
+            let fillW = barW * CGFloat(percentage / 100.0)
+            if fillW > 0.5 {
+                (percentage >= 90 ? colorRed : colorOrange).setFill()
+                NSBezierPath(roundedRect: NSRect(x: barX, y: barY, width: fillW, height: barH),
+                             xRadius: r, yRadius: r).fill()
+            }
+        }
+    }
+
     /// Create a Retina-quality NSImage by drawing into a 2x bitmap.
     private static func renderImage(width: CGFloat, draw: (CGContext) -> Void) -> NSImage {
         let pixelW = Int(width * scale)

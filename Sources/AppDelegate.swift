@@ -20,7 +20,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var miBarPct: NSMenuItem!
     private var miBarOnly: NSMenuItem!
     private var miPctOnly: NSMenuItem!
-    private var miResetInfo: NSMenuItem!
+    private var miSessionReset: NSMenuItem!
+    private var miWeeklyReset: NSMenuItem!
+    private var sessionBarView: BarRenderer.UsageBarMenuView!
+    private var weeklyBarView: BarRenderer.UsageBarMenuView!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         loadPrefs()
@@ -32,6 +35,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Build menu
         let menu = NSMenu()
+
+        // Session usage
+        let sessionBarItem = NSMenuItem()
+        sessionBarView = BarRenderer.UsageBarMenuView(title: "Session")
+        sessionBarItem.view = sessionBarView
+        menu.addItem(sessionBarItem)
+
+        miSessionReset = NSMenuItem(title: "Resets in: ...", action: nil, keyEquivalent: "")
+        miSessionReset.isEnabled = false
+        menu.addItem(miSessionReset)
+
+        menu.addItem(.separator())
+
+        // Weekly usage
+        let weeklyBarItem = NSMenuItem()
+        weeklyBarView = BarRenderer.UsageBarMenuView(title: "Weekly")
+        weeklyBarItem.view = weeklyBarView
+        menu.addItem(weeklyBarItem)
+
+        miWeeklyReset = NSMenuItem(title: "Resets: ...", action: nil, keyEquivalent: "")
+        miWeeklyReset.isEnabled = false
+        menu.addItem(miWeeklyReset)
+
+        menu.addItem(.separator())
 
         miFiveHour = NSMenuItem(title: "5-Hour Usage", action: #selector(setFiveHour), keyEquivalent: "")
         miFiveHour.target = self
@@ -66,10 +93,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(miPctOnly)
 
         menu.addItem(.separator())
-
-        miResetInfo = NSMenuItem(title: "Resets in: ...", action: nil, keyEquivalent: "")
-        miResetInfo.isEnabled = false
-        menu.addItem(miResetInfo)
 
         let refreshItem = NSMenuItem(title: "Refresh Now", action: #selector(refreshNow), keyEquivalent: "r")
         refreshItem.target = self
@@ -137,7 +160,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 if usage == nil && !self.client.isAuthenticated {
                     self.setStatusImage(BarRenderer.renderUnauthenticated(logo: self.logo))
-                    self.miResetInfo.title = "Resets in: n/a"
+                    self.miSessionReset.title = "Resets in: n/a"
+                    self.miWeeklyReset.title = "Resets: n/a"
+                    self.sessionBarView.update(percentage: 0)
+                    self.weeklyBarView.update(percentage: 0)
                     return
                 }
 
@@ -167,19 +193,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let pct: Double
-        let reset: String?
-        if activeView == "five_hour" {
-            pct = usage.fiveHourPct
-            reset = usage.fiveHourReset
-        } else {
-            pct = usage.sevenDayPct
-            reset = usage.sevenDayReset
-        }
+        // Update menu bars and reset times
+        sessionBarView.update(percentage: usage.fiveHourPct)
+        weeklyBarView.update(percentage: usage.sevenDayPct)
+        miSessionReset.title = "Resets in \(formatResetTime(usage.fiveHourReset))"
+        miWeeklyReset.title = "Resets \(formatResetTimeAbsolute(usage.sevenDayReset))"
 
+        // Update toolbar
+        let pct = activeView == "five_hour" ? usage.fiveHourPct : usage.sevenDayPct
         let image = BarRenderer.render(utilization: pct, mode: displayMode, invert: invert, logo: logo)
         setStatusImage(image)
-        miResetInfo.title = "Resets in: \(formatResetTime(reset))"
     }
 
     // MARK: - Menu checks
@@ -297,5 +320,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return "\(hours)h \(minutes)m"
         }
         return "\(minutes)m"
+    }
+
+    private func formatResetTimeAbsolute(_ resets: String?) -> String {
+        guard let resets = resets else { return "unknown" }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        guard let resetDate = formatter.date(from: resets) ?? {
+            formatter.formatOptions = [.withInternetDateTime]
+            return formatter.date(from: resets)
+        }() else {
+            return "unknown"
+        }
+
+        let df = DateFormatter()
+        df.dateFormat = "EEE, HH:mm"
+        return df.string(from: resetDate)
     }
 }
