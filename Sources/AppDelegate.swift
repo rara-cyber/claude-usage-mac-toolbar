@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
@@ -24,6 +25,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var miWeeklyReset: NSMenuItem!
     private var sessionBarView: BarRenderer.UsageBarMenuView!
     private var weeklyBarView: BarRenderer.UsageBarMenuView!
+    private var miSessionForecast: NSMenuItem!
+    private var miWeeklyForecast: NSMenuItem!
+    private let usageHistory = UsageHistory()
+    private var faqWindow: NSWindow?
+    private var miLaunchAtLogin: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         loadPrefs()
@@ -46,6 +52,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         miSessionReset.isEnabled = false
         menu.addItem(miSessionReset)
 
+        miSessionForecast = NSMenuItem(title: "Forecast: Calculating...", action: nil, keyEquivalent: "")
+        miSessionForecast.isEnabled = false
+        menu.addItem(miSessionForecast)
+
         menu.addItem(.separator())
 
         // Weekly usage
@@ -57,6 +67,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         miWeeklyReset = NSMenuItem(title: "Resets: ...", action: nil, keyEquivalent: "")
         miWeeklyReset.isEnabled = false
         menu.addItem(miWeeklyReset)
+
+        miWeeklyForecast = NSMenuItem(title: "Forecast: Calculating...", action: nil, keyEquivalent: "")
+        miWeeklyForecast.isEnabled = false
+        menu.addItem(miWeeklyForecast)
 
         menu.addItem(.separator())
 
@@ -97,6 +111,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let refreshItem = NSMenuItem(title: "Refresh Now", action: #selector(refreshNow), keyEquivalent: "r")
         refreshItem.target = self
         menu.addItem(refreshItem)
+
+        let faqItem = NSMenuItem(title: "About & FAQ", action: #selector(showFAQ), keyEquivalent: "")
+        faqItem.target = self
+        menu.addItem(faqItem)
+
+        miLaunchAtLogin = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        miLaunchAtLogin.target = self
+        menu.addItem(miLaunchAtLogin)
 
         menu.addItem(.separator())
 
@@ -175,6 +197,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
 
                 self.lastUsage = usage
+                self.usageHistory.record(usage!)
                 self.updateDisplay()
 
                 // Adjust timer interval on backoff
@@ -199,10 +222,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         miSessionReset.title = "Resets in \(formatResetTime(usage.fiveHourReset))"
         miWeeklyReset.title = "Resets \(formatResetTimeAbsolute(usage.sevenDayReset))"
 
+        // Update forecasts
+        updateForecastMenuItem(miSessionForecast, forecast: usageHistory.forecast(for: .session))
+        updateForecastMenuItem(miWeeklyForecast, forecast: usageHistory.forecast(for: .weekly))
+
         // Update toolbar
         let pct = activeView == "five_hour" ? usage.fiveHourPct : usage.sevenDayPct
         let image = BarRenderer.render(utilization: pct, mode: displayMode, invert: invert, logo: logo)
         setStatusImage(image)
+    }
+
+    private func updateForecastMenuItem(_ item: NSMenuItem, forecast: Forecast) {
+        let circle = "\u{25CF} "
+        let color: NSColor
+        let text: String
+
+        switch forecast.pace {
+        case .green:
+            color = .systemGreen
+            text = "On pace"
+        case .yellow:
+            color = .systemOrange
+            text = "Moderate pace"
+        case .red:
+            color = .systemRed
+            text = "Heavy pace"
+        case .unknown:
+            color = .systemGray
+            text = "Calculating..."
+        }
+
+        var label = "Forecast: \(text)"
+        if let projected = forecast.projectedPctAtReset, forecast.pace != .unknown {
+            label += " (~\(Int(projected.rounded()))% at reset)"
+        }
+
+        let attrStr = NSMutableAttributedString(string: circle + label)
+        attrStr.addAttribute(.foregroundColor, value: color, range: NSRange(location: 0, length: 1))
+        item.attributedTitle = attrStr
     }
 
     // MARK: - Menu checks
@@ -215,6 +272,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         miBarPct.state = displayMode == .barAndPct ? .on : .off
         miBarOnly.state = displayMode == .barOnly ? .on : .off
         miPctOnly.state = displayMode == .pctOnly ? .on : .off
+
+        if #available(macOS 13.0, *) {
+            miLaunchAtLogin.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        } else {
+            miLaunchAtLogin.isHidden = true
+        }
     }
 
     // MARK: - Menu actions
@@ -270,6 +333,158 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func refreshNow() {
         poll()
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        if #available(macOS 13.0, *) {
+            do {
+                if SMAppService.mainApp.status == .enabled {
+                    try SMAppService.mainApp.unregister()
+                } else {
+                    try SMAppService.mainApp.register()
+                }
+            } catch {
+                // Silently ignore — may fail if app is not in /Applications
+            }
+            updateMenuChecks()
+        }
+    }
+
+    @objc private func showFAQ() {
+        if let w = faqWindow {
+            w.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let w = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 460),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        w.title = "Claude Usage Bar — FAQ"
+        w.center()
+        w.isReleasedWhenClosed = false
+
+        let scroll = NSScrollView(frame: w.contentView!.bounds)
+        scroll.autoresizingMask = [.width, .height]
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+
+        let text = NSTextView(frame: NSRect(x: 0, y: 0, width: scroll.contentSize.width, height: 0))
+        text.isEditable = false
+        text.isSelectable = true
+        text.drawsBackground = false
+        text.textContainerInset = NSSize(width: 16, height: 16)
+        text.autoresizingMask = [.width]
+        text.textContainer?.widthTracksTextView = true
+
+        text.textStorage?.setAttributedString(faqContent())
+
+        scroll.documentView = text
+        w.contentView = scroll
+        w.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        faqWindow = w
+    }
+
+    private func faqContent() -> NSAttributedString {
+        let result = NSMutableAttributedString()
+
+        let titleFont = NSFont.systemFont(ofSize: 18, weight: .bold)
+        let headingFont = NSFont.systemFont(ofSize: 14, weight: .semibold)
+        let bodyFont = NSFont.systemFont(ofSize: 13, weight: .regular)
+        let titleColor = NSColor.labelColor
+        let bodyColor = NSColor.secondaryLabelColor
+
+        func addTitle(_ str: String) {
+            result.append(NSAttributedString(string: str + "\n\n", attributes: [
+                .font: titleFont, .foregroundColor: titleColor
+            ]))
+        }
+
+        func addHeading(_ str: String) {
+            result.append(NSAttributedString(string: str + "\n", attributes: [
+                .font: headingFont, .foregroundColor: titleColor
+            ]))
+        }
+
+        func addBody(_ str: String) {
+            result.append(NSAttributedString(string: str + "\n\n", attributes: [
+                .font: bodyFont, .foregroundColor: bodyColor
+            ]))
+        }
+
+        addTitle("Claude Usage Bar — FAQ")
+
+        addHeading("How does the forecast work?")
+        addBody("""
+            The app records your usage percentage every 60 seconds and saves \
+            snapshots to a local file. It then calculates your current rate of \
+            consumption (using the last 1–3 hours of data) and projects forward \
+            to when your limit resets. Based on the projected usage at reset time, \
+            it shows a pace indicator:\n\
+            \u{25CF} Green — On pace: projected usage under 80%\n\
+            \u{25CF} Yellow — Moderate: projected usage 80–95%\n\
+            \u{25CF} Red — Heavy: projected usage over 95%\n\n\
+            The forecast shows "Calculating..." until enough data has been \
+            collected (at least 5–10 minutes of history).
+            """)
+
+        addHeading("How does authentication work?")
+        addBody("""
+            This app reads the OAuth token that Claude Code stores in your \
+            macOS Keychain. It never asks for your password or API key directly. \
+            If you're signed into Claude Code, the app picks up the token \
+            automatically. If the token rotates, the app detects this and \
+            refreshes on the next poll.
+            """)
+
+        addHeading("Where is my data stored?")
+        addBody("""
+            Everything stays on your computer. Usage history is saved to:\n\
+            ~/Library/Application Support/ClaudeUsageBar/usage_history.json\n\n\
+            Preferences (display mode, active view) are stored in the standard \
+            macOS UserDefaults. No data is sent to any server — the only network \
+            request is the usage API call to api.anthropic.com.
+            """)
+
+        addHeading("How often does it refresh?")
+        addBody("""
+            Every 60 seconds. If the API returns errors 3 times in a row, it \
+            backs off to every 5 minutes. You can also click "Refresh Now" at \
+            any time. The last successful reading is always shown in the menu bar.
+            """)
+
+        addHeading("What are the two usage windows?")
+        addBody("""
+            Session (5-hour) — a rolling window that resets every 5 hours. \
+            This reflects your short-term burst usage.\n\n\
+            Weekly (7-day) — resets once per week on a fixed schedule. This \
+            is your overall usage cap for the billing period.
+            """)
+
+        // About section
+        result.append(NSAttributedString(string: "\n", attributes: [.font: bodyFont]))
+
+        let separatorAttrs: [NSAttributedString.Key: Any] = [
+            .font: bodyFont, .foregroundColor: NSColor.separatorColor
+        ]
+        result.append(NSAttributedString(string: "————————————————————————————————\n\n", attributes: separatorAttrs))
+
+        addHeading("About")
+        addBody("""
+            Created by Marcel Claus-Ahrens.\n\n\
+            This app is not affiliated with, endorsed by, or associated with \
+            Anthropic in any way. It is an independent utility made from \
+            developer to developer.\n\n\
+            Free and open source, licensed under the MIT License.\n\
+            https://github.com/geckse/claude-usage-mac-toolbar
+            """)
+
+        return result
     }
 
     @objc private func quit() {

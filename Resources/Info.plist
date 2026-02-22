@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Claude Usage</string>
+    <string>Claude Usage Bar</string>
     <key>CFBundleDisplayName</key>
-    <string>Claude Usage</string>
+    <string>Claude Usage Bar</string>
     <key>CFBundleIdentifier</key>
     <string>com.github.claude-usage-toolbar</string>
     <key>CFBundleVersion</key>
@@ -22,5 +22,7 @@
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
 </dict>
 </plist>
