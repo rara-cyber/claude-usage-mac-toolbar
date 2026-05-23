@@ -47,7 +47,7 @@ if [[ "$1" == "--install" ]]; then
     INSTALLED="/Applications/$APP_NAME.app"
     echo ""
     echo "Installing to $INSTALLED..."
-    pkill -f "$BINARY" 2>/dev/null || true
+    pkill -x "$BINARY" 2>/dev/null || true
     rm -rf "$INSTALLED"
     cp -R "$APP" "/Applications/"
     open "$INSTALLED"
