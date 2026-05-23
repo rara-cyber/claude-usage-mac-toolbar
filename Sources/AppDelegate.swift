@@ -9,24 +9,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var logo: NSImage?
 
     // Preferences
-    private var activeView: String = "five_hour"   // "five_hour" or "seven_day"
-    private var displayMode: DisplayMode = .barAndPct
     private var invert: Bool = false
+    private var warningThreshold: Double = 85
+
+    private let warningOptions: [Double] = [70, 75, 80, 85, 90, 95]
+    private var miWarningItems: [NSMenuItem] = []
 
     // Menu items (for updating checkmarks)
-    private var miFiveHour: NSMenuItem!
-    private var miSevenDay: NSMenuItem!
     private var miUsed: NSMenuItem!
     private var miRemaining: NSMenuItem!
-    private var miBarPct: NSMenuItem!
-    private var miBarOnly: NSMenuItem!
-    private var miPctOnly: NSMenuItem!
     private var miSessionReset: NSMenuItem!
     private var miWeeklyReset: NSMenuItem!
     private var sessionBarView: BarRenderer.UsageBarMenuView!
     private var weeklyBarView: BarRenderer.UsageBarMenuView!
-    private var miSessionForecast: NSMenuItem!
-    private var miWeeklyForecast: NSMenuItem!
     private let usageHistory = UsageHistory()
     private var faqWindow: NSWindow?
     private var miLaunchAtLogin: NSMenuItem!
@@ -52,10 +47,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         miSessionReset.isEnabled = false
         menu.addItem(miSessionReset)
 
-        miSessionForecast = NSMenuItem(title: "Forecast: Calculating...", action: nil, keyEquivalent: "")
-        miSessionForecast.isEnabled = false
-        menu.addItem(miSessionForecast)
-
         menu.addItem(.separator())
 
         // Weekly usage
@@ -67,20 +58,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         miWeeklyReset = NSMenuItem(title: "Resets: ...", action: nil, keyEquivalent: "")
         miWeeklyReset.isEnabled = false
         menu.addItem(miWeeklyReset)
-
-        miWeeklyForecast = NSMenuItem(title: "Forecast: Calculating...", action: nil, keyEquivalent: "")
-        miWeeklyForecast.isEnabled = false
-        menu.addItem(miWeeklyForecast)
-
-        menu.addItem(.separator())
-
-        miFiveHour = NSMenuItem(title: "5-Hour Usage", action: #selector(setFiveHour), keyEquivalent: "")
-        miFiveHour.target = self
-        menu.addItem(miFiveHour)
-
-        miSevenDay = NSMenuItem(title: "Weekly Usage", action: #selector(setSevenDay), keyEquivalent: "")
-        miSevenDay.target = self
-        menu.addItem(miSevenDay)
 
         menu.addItem(.separator())
 
@@ -94,17 +71,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        miBarPct = NSMenuItem(title: "Bar + Percentage", action: #selector(setBarPct), keyEquivalent: "")
-        miBarPct.target = self
-        menu.addItem(miBarPct)
-
-        miBarOnly = NSMenuItem(title: "Bar Only", action: #selector(setBarOnly), keyEquivalent: "")
-        miBarOnly.target = self
-        menu.addItem(miBarOnly)
-
-        miPctOnly = NSMenuItem(title: "Percentage Only", action: #selector(setPctOnly), keyEquivalent: "")
-        miPctOnly.target = self
-        menu.addItem(miPctOnly)
+        // Warning threshold submenu
+        let warningSub = NSMenu()
+        miWarningItems.removeAll()
+        for value in warningOptions {
+            let item = NSMenuItem(title: "\(Int(value))%",
+                                  action: #selector(setWarningThreshold(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.tag = Int(value)
+            warningSub.addItem(item)
+            miWarningItems.append(item)
+        }
+        let warningParent = NSMenuItem(title: "Warning Threshold",
+                                       action: nil, keyEquivalent: "")
+        warningParent.submenu = warningSub
+        menu.addItem(warningParent)
 
         menu.addItem(.separator())
 
@@ -129,8 +111,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
         updateMenuChecks()
 
-        // Show initial state
-        setStatusImage(BarRenderer.renderUnauthenticated(logo: logo))
+        // Render the last persisted snapshot immediately so the icon is not
+        // blank during the first poll's network round-trip.
+        if let cached = usageHistory.cachedUsage() {
+            lastUsage = cached
+            updateDisplay()
+        } else {
+            setStatusImage(BarRenderer.renderUnauthenticated())
+        }
 
         // Poll immediately, then every 60s
         poll()
@@ -181,17 +169,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             DispatchQueue.main.async {
                 if usage == nil && !self.client.isAuthenticated {
-                    self.setStatusImage(BarRenderer.renderUnauthenticated(logo: self.logo))
+                    self.setStatusImage(BarRenderer.renderUnauthenticated())
                     self.miSessionReset.title = "Resets in: n/a"
                     self.miWeeklyReset.title = "Resets: n/a"
-                    self.sessionBarView.update(percentage: 0)
-                    self.weeklyBarView.update(percentage: 0)
+                    self.sessionBarView.update(percentage: 0, invert: self.invert, warningThreshold: self.warningThreshold)
+                    self.weeklyBarView.update(percentage: 0, invert: self.invert, warningThreshold: self.warningThreshold)
                     return
                 }
 
                 if usage == nil {
                     if self.lastUsage == nil {
-                        self.setStatusImage(BarRenderer.renderUnauthenticated(logo: self.logo))
+                        self.setStatusImage(BarRenderer.renderUnauthenticated())
                     }
                     return
                 }
@@ -212,66 +200,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateDisplay() {
         guard let usage = lastUsage else {
-            setStatusImage(BarRenderer.renderUnauthenticated(logo: logo))
+            setStatusImage(BarRenderer.renderUnauthenticated())
             return
         }
 
         // Update menu bars and reset times
-        sessionBarView.update(percentage: usage.fiveHourPct)
-        weeklyBarView.update(percentage: usage.sevenDayPct)
+        sessionBarView.update(percentage: usage.fiveHourPct, invert: invert, warningThreshold: warningThreshold)
+        weeklyBarView.update(percentage: usage.sevenDayPct, invert: invert, warningThreshold: warningThreshold)
         miSessionReset.title = "Resets in \(formatResetTime(usage.fiveHourReset))"
         miWeeklyReset.title = "Resets \(formatResetTimeAbsolute(usage.sevenDayReset))"
 
-        // Update forecasts
-        updateForecastMenuItem(miSessionForecast, forecast: usageHistory.forecast(for: .session))
-        updateForecastMenuItem(miWeeklyForecast, forecast: usageHistory.forecast(for: .weekly))
-
-        // Update toolbar
-        let pct = activeView == "five_hour" ? usage.fiveHourPct : usage.sevenDayPct
-        let image = BarRenderer.render(utilization: pct, mode: displayMode, invert: invert, logo: logo)
+        // Update toolbar — two stacked bars, session + weekly
+        let image = BarRenderer.renderCircles(
+            sessionPct: usage.fiveHourPct,
+            weeklyPct: usage.sevenDayPct,
+            invert: invert,
+            warningThreshold: warningThreshold
+        )
         setStatusImage(image)
-    }
-
-    private func updateForecastMenuItem(_ item: NSMenuItem, forecast: Forecast) {
-        let circle = "\u{25CF} "
-        let color: NSColor
-        let text: String
-
-        switch forecast.pace {
-        case .green:
-            color = .systemGreen
-            text = "On pace"
-        case .yellow:
-            color = .systemOrange
-            text = "Moderate pace"
-        case .red:
-            color = .systemRed
-            text = "Heavy pace"
-        case .unknown:
-            color = .systemGray
-            text = "Calculating..."
-        }
-
-        var label = "Forecast: \(text)"
-        if let projected = forecast.projectedPctAtReset, forecast.pace != .unknown {
-            label += " (~\(Int(projected.rounded()))% at reset)"
-        }
-
-        let attrStr = NSMutableAttributedString(string: circle + label)
-        attrStr.addAttribute(.foregroundColor, value: color, range: NSRange(location: 0, length: 1))
-        item.attributedTitle = attrStr
     }
 
     // MARK: - Menu checks
 
     private func updateMenuChecks() {
-        miFiveHour.state = activeView == "five_hour" ? .on : .off
-        miSevenDay.state = activeView == "seven_day" ? .on : .off
         miUsed.state = !invert ? .on : .off
         miRemaining.state = invert ? .on : .off
-        miBarPct.state = displayMode == .barAndPct ? .on : .off
-        miBarOnly.state = displayMode == .barOnly ? .on : .off
-        miPctOnly.state = displayMode == .pctOnly ? .on : .off
+
+        for item in miWarningItems {
+            item.state = Double(item.tag) == warningThreshold ? .on : .off
+        }
 
         if #available(macOS 13.0, *) {
             miLaunchAtLogin.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -281,20 +238,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Menu actions
-
-    @objc private func setFiveHour() {
-        activeView = "five_hour"
-        updateMenuChecks()
-        updateDisplay()
-        savePrefs()
-    }
-
-    @objc private func setSevenDay() {
-        activeView = "seven_day"
-        updateMenuChecks()
-        updateDisplay()
-        savePrefs()
-    }
 
     @objc private func setUsed() {
         invert = false
@@ -310,22 +253,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         savePrefs()
     }
 
-    @objc private func setBarPct() {
-        displayMode = .barAndPct
-        updateMenuChecks()
-        updateDisplay()
-        savePrefs()
-    }
-
-    @objc private func setBarOnly() {
-        displayMode = .barOnly
-        updateMenuChecks()
-        updateDisplay()
-        savePrefs()
-    }
-
-    @objc private func setPctOnly() {
-        displayMode = .pctOnly
+    @objc private func setWarningThreshold(_ sender: NSMenuItem) {
+        warningThreshold = Double(sender.tag)
         updateMenuChecks()
         updateDisplay()
         savePrefs()
@@ -419,20 +348,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         addTitle("Claude Usage Bar — FAQ")
 
-        addHeading("How does the forecast work?")
-        addBody("""
-            The app records your usage percentage every 60 seconds and saves \
-            snapshots to a local file. It then calculates your current rate of \
-            consumption (using the last 1–3 hours of data) and projects forward \
-            to when your limit resets. Based on the projected usage at reset time, \
-            it shows a pace indicator:\n\
-            \u{25CF} Green — On pace: projected usage under 80%\n\
-            \u{25CF} Yellow — Moderate: projected usage 80–95%\n\
-            \u{25CF} Red — Heavy: projected usage over 95%\n\n\
-            The forecast shows "Calculating..." until enough data has been \
-            collected (at least 5–10 minutes of history).
-            """)
-
         addHeading("How does authentication work?")
         addBody("""
             This app reads the OAuth token that Claude Code stores in your \
@@ -476,12 +391,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         addHeading("About")
         addBody("""
-            Created by Marcel Claus-Ahrens.\n\n\
+            Built by SIÁN Agency — minimal, modern, purposeful tools for \
+            people who ship.\n\n\
+            https://www.sian-agency.online\n\
+            hello@sian-agency.online\n\n\
             This app is not affiliated with, endorsed by, or associated with \
             Anthropic in any way. It is an independent utility made from \
-            developer to developer.\n\n\
-            Free and open source, licensed under the MIT License.\n\
-            https://github.com/geckse/claude-usage-mac-toolbar
+            developer to developer.
             """)
 
         return result
@@ -495,18 +411,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func loadPrefs() {
         let d = UserDefaults.standard
-        activeView = d.string(forKey: "activeView") ?? "five_hour"
         invert = d.bool(forKey: "invert")
-        if let modeStr = d.string(forKey: "displayMode"), let mode = DisplayMode(rawValue: modeStr) {
-            displayMode = mode
-        }
+        let stored = d.double(forKey: "warningThreshold")
+        warningThreshold = stored > 0 ? stored : 85
     }
 
     private func savePrefs() {
         let d = UserDefaults.standard
-        d.set(activeView, forKey: "activeView")
         d.set(invert, forKey: "invert")
-        d.set(displayMode.rawValue, forKey: "displayMode")
+        d.set(warningThreshold, forKey: "warningThreshold")
     }
 
     // MARK: - Helpers

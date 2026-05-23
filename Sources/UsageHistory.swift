@@ -8,20 +8,6 @@ struct UsageSnapshot: Codable {
     let weeklyResetTimestamp: Date?
 }
 
-enum PaceLevel {
-    case green, yellow, red, unknown
-}
-
-struct Forecast {
-    let projectedPctAtReset: Double?
-    let pace: PaceLevel
-}
-
-enum ForecastWindow {
-    case session   // 5-hour
-    case weekly    // 7-day
-}
-
 class UsageHistory {
     private var snapshots: [UsageSnapshot] = []
     private let fileURL: URL
@@ -38,6 +24,20 @@ class UsageHistory {
 
     // MARK: - Public
 
+    /// Last persisted snapshot, converted back to UsageData. Used to render
+    /// the menu bar instantly on cold start while the first poll is in flight.
+    func cachedUsage() -> UsageData? {
+        guard let last = snapshots.last else { return nil }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return UsageData(
+            fiveHourPct: last.sessionPct,
+            fiveHourReset: last.sessionResetTimestamp.map { iso.string(from: $0) },
+            sevenDayPct: last.weeklyPct,
+            sevenDayReset: last.weeklyResetTimestamp.map { iso.string(from: $0) }
+        )
+    }
+
     func record(_ usage: UsageData) {
         let snapshot = UsageSnapshot(
             timestamp: Date(),
@@ -49,63 +49,6 @@ class UsageHistory {
         snapshots.append(snapshot)
         pruneOldEntries()
         save()
-    }
-
-    func forecast(for window: ForecastWindow) -> Forecast {
-        let cycle = currentCycleSnapshots(for: window)
-        guard cycle.count >= 2 else {
-            return Forecast(projectedPctAtReset: nil, pace: .unknown)
-        }
-
-        let latest = cycle.last!
-        let latestPct = pct(latest, window)
-
-        if latestPct >= 95 {
-            return Forecast(projectedPctAtReset: 100, pace: .red)
-        }
-
-        guard let resetDate = resetDate(latest, window) else {
-            return Forecast(projectedPctAtReset: nil, pace: .unknown)
-        }
-
-        let hoursUntilReset = resetDate.timeIntervalSinceNow / 3600
-        if hoursUntilReset <= 0 {
-            return Forecast(projectedPctAtReset: nil, pace: .green)
-        }
-
-        // Recent data window: 1h for session (5h cycle), 3h for weekly
-        let recentHours: Double = window == .session ? 1 : 3
-        let recentCutoff = Date().addingTimeInterval(-recentHours * 3600)
-        let recentCycle = cycle.filter { $0.timestamp >= recentCutoff }
-        let workingSet = recentCycle.count >= 2 ? recentCycle : cycle
-
-        // Need at least 5 min span for session, 10 min for weekly
-        let minSpanMinutes: Double = window == .session ? 5 : 10
-        let earliest = workingSet.first!
-        let spanHours = workingSet.last!.timestamp.timeIntervalSince(earliest.timestamp) / 3600
-        if spanHours < minSpanMinutes / 60.0 {
-            return Forecast(projectedPctAtReset: nil, pace: .unknown)
-        }
-
-        let slope = (pct(workingSet.last!, window) - pct(earliest, window)) / spanHours
-
-        if slope <= 0 {
-            let pace: PaceLevel = latestPct < 80 ? .green : .yellow
-            return Forecast(projectedPctAtReset: latestPct, pace: pace)
-        }
-
-        let projected = min(100, max(0, latestPct + slope * hoursUntilReset))
-
-        let pace: PaceLevel
-        if projected >= 95 {
-            pace = .red
-        } else if projected >= 80 {
-            pace = .yellow
-        } else {
-            pace = .green
-        }
-
-        return Forecast(projectedPctAtReset: projected, pace: pace)
     }
 
     // MARK: - Persistence
@@ -130,36 +73,6 @@ class UsageHistory {
     }
 
     // MARK: - Helpers
-
-    private func pct(_ snapshot: UsageSnapshot, _ window: ForecastWindow) -> Double {
-        window == .session ? snapshot.sessionPct : snapshot.weeklyPct
-    }
-
-    private func resetDate(_ snapshot: UsageSnapshot, _ window: ForecastWindow) -> Date? {
-        window == .session ? snapshot.sessionResetTimestamp : snapshot.weeklyResetTimestamp
-    }
-
-    private func currentCycleSnapshots(for window: ForecastWindow) -> [UsageSnapshot] {
-        guard let last = snapshots.last,
-              let lastReset = resetDate(last, window) else {
-            return snapshots
-        }
-
-        var cycle = snapshots.filter { resetDate($0, window) == lastReset }
-
-        // Detect sudden drops (reset mid-data) and discard pre-drop data
-        var cleanStart = 0
-        for i in 1..<cycle.count {
-            if pct(cycle[i], window) < pct(cycle[i - 1], window) - 20 {
-                cleanStart = i
-            }
-        }
-        if cleanStart > 0 {
-            cycle = Array(cycle[cleanStart...])
-        }
-
-        return cycle
-    }
 
     private func parseISO8601(_ string: String?) -> Date? {
         guard let string = string else { return nil }

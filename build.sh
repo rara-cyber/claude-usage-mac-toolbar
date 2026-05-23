@@ -42,6 +42,18 @@ cp Resources/Info.plist "$APP/Contents/"
 cp Resources/icon.png "$APP/Contents/Resources/"
 
 echo "Done: $APP"
-echo ""
-echo "Run with:  open \"$APP\""
-echo "Or:        \"$APP/Contents/MacOS/ClaudeUsage\""
+
+if [[ "$1" == "--install" ]]; then
+    INSTALLED="/Applications/$APP_NAME.app"
+    echo ""
+    echo "Installing to $INSTALLED..."
+    pkill -f "$BINARY" 2>/dev/null || true
+    rm -rf "$INSTALLED"
+    cp -R "$APP" "/Applications/"
+    open "$INSTALLED"
+    echo "Installed and launched."
+else
+    echo ""
+    echo "Run with:        open \"$APP\""
+    echo "Install + run:   ./build.sh --install"
+fi
