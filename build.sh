@@ -41,6 +41,20 @@ mv "$BINARY" "$APP/Contents/MacOS/"
 cp Resources/Info.plist "$APP/Contents/"
 cp Resources/icon.png "$APP/Contents/Resources/"
 
+# Sign with a real code-signing identity if one exists, so the macOS Keychain
+# "Always Allow" grant persists across launches and rebuilds. Ad-hoc / linker
+# signatures get a per-build cdhash identity that the Keychain won't remember, so
+# Claude Code's token prompt would otherwise reappear on every launch. Override the
+# identity with CODESIGN_IDENTITY=...; on CI (no identity in the keychain) this is
+# skipped and the released bundle stays ad-hoc, exactly as before.
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' 'NR==1{print $2}')}"
+if [[ -n "$CODESIGN_IDENTITY" ]]; then
+    echo "Signing with '$CODESIGN_IDENTITY'..."
+    codesign --force --sign "$CODESIGN_IDENTITY" "$APP"
+else
+    echo "No code-signing identity found; leaving ad-hoc (Keychain prompt will recur)."
+fi
+
 echo "Done: $APP"
 
 if [[ "$1" == "--install" ]]; then
