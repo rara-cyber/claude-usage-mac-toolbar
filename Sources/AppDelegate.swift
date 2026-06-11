@@ -1,7 +1,7 @@
 import AppKit
 import ServiceManagement
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var pollTimer: Timer?
     private let client = UsageClient()
@@ -11,6 +11,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Preferences
     private var invert: Bool = false
     private var warningThreshold: Double = 85
+    private var highlightPeak: Bool = true
 
     private let warningOptions: [Double] = [70, 75, 80, 85, 90, 95]
     private var miWarningItems: [NSMenuItem] = []
@@ -20,6 +21,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var miRemaining: NSMenuItem!
     private var miSessionReset: NSMenuItem!
     private var miWeeklyReset: NSMenuItem!
+    private var miPeakStatus: NSMenuItem!
+    private var miHighlightPeak: NSMenuItem!
     private var sessionBarView: BarRenderer.UsageBarMenuView!
     private var weeklyBarView: BarRenderer.UsageBarMenuView!
     private let usageHistory = UsageHistory()
@@ -58,6 +61,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         miWeeklyReset = NSMenuItem(title: "Resets: ...", action: nil, keyEquivalent: "")
         miWeeklyReset.isEnabled = false
         menu.addItem(miWeeklyReset)
+
+        menu.addItem(.separator())
+
+        // Peak hours (5–11 AM Pacific, shown in local time)
+        miPeakStatus = NSMenuItem(title: "Peak hours: ...", action: nil, keyEquivalent: "")
+        miPeakStatus.isEnabled = false
+        menu.addItem(miPeakStatus)
+
+        miHighlightPeak = NSMenuItem(title: "Highlight Peak Hours", action: #selector(toggleHighlightPeak), keyEquivalent: "")
+        miHighlightPeak.target = self
+        menu.addItem(miHighlightPeak)
 
         menu.addItem(.separator())
 
@@ -108,8 +122,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         quitItem.target = self
         menu.addItem(quitItem)
 
+        menu.delegate = self
         statusItem.menu = menu
         updateMenuChecks()
+        updatePeakStatus()
 
         // Render the last persisted snapshot immediately so the icon is not
         // blank during the first poll's network round-trip.
@@ -174,6 +190,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     self.miWeeklyReset.title = "Resets: n/a"
                     self.sessionBarView.update(percentage: 0, invert: self.invert, warningThreshold: self.warningThreshold)
                     self.weeklyBarView.update(percentage: 0, invert: self.invert, warningThreshold: self.warningThreshold)
+                    self.updatePeakStatus()
                     return
                 }
 
@@ -199,14 +216,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateDisplay() {
+        updatePeakStatus()
+
         guard let usage = lastUsage else {
             setStatusImage(BarRenderer.renderUnauthenticated())
             return
         }
 
+        let peakActive = highlightPeak && PeakHours.isActive()
+
         // Update menu bars and reset times
-        sessionBarView.update(percentage: usage.fiveHourPct, invert: invert, warningThreshold: warningThreshold)
-        weeklyBarView.update(percentage: usage.sevenDayPct, invert: invert, warningThreshold: warningThreshold)
+        sessionBarView.update(percentage: usage.fiveHourPct, invert: invert, warningThreshold: warningThreshold, peakActive: peakActive)
+        weeklyBarView.update(percentage: usage.sevenDayPct, invert: invert, warningThreshold: warningThreshold, peakActive: peakActive)
         miSessionReset.title = "Resets in \(formatResetTime(usage.fiveHourReset))"
         miWeeklyReset.title = "Resets \(formatResetTimeAbsolute(usage.sevenDayReset))"
 
@@ -215,9 +236,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             sessionPct: usage.fiveHourPct,
             weeklyPct: usage.sevenDayPct,
             invert: invert,
-            warningThreshold: warningThreshold
+            warningThreshold: warningThreshold,
+            peakActive: peakActive
         )
         setStatusImage(image)
+    }
+
+    /// Refresh the dropdown's peak-hours status row. The violet dot only shows
+    /// when peak is live *and* highlighting is on — matching the bar color.
+    private func updatePeakStatus() {
+        let label = PeakHours.statusLabel()
+        let lit = highlightPeak && PeakHours.isActive()
+        let font = NSFont.menuFont(ofSize: 13)
+
+        if lit {
+            let s = NSMutableAttributedString(string: "● ", attributes: [
+                .foregroundColor: BarRenderer.colorViolet, .font: font
+            ])
+            s.append(NSAttributedString(string: "Peak hours: \(label)", attributes: [
+                .foregroundColor: NSColor.labelColor, .font: font
+            ]))
+            miPeakStatus.attributedTitle = s
+        } else {
+            miPeakStatus.attributedTitle = NSAttributedString(string: "Peak hours: \(label)", attributes: [
+                .foregroundColor: NSColor.secondaryLabelColor, .font: font
+            ])
+        }
+    }
+
+    // MARK: - NSMenuDelegate
+
+    func menuWillOpen(_ menu: NSMenu) {
+        // Peak status drifts with the clock; refresh the moment the menu opens.
+        updateDisplay()
     }
 
     // MARK: - Menu checks
@@ -229,6 +280,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         for item in miWarningItems {
             item.state = Double(item.tag) == warningThreshold ? .on : .off
         }
+
+        miHighlightPeak.state = highlightPeak ? .on : .off
 
         if #available(macOS 13.0, *) {
             miLaunchAtLogin.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -255,6 +308,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func setWarningThreshold(_ sender: NSMenuItem) {
         warningThreshold = Double(sender.tag)
+        updateMenuChecks()
+        updateDisplay()
+        savePrefs()
+    }
+
+    @objc private func toggleHighlightPeak() {
+        highlightPeak.toggle()
         updateMenuChecks()
         updateDisplay()
         savePrefs()
@@ -414,12 +474,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         invert = d.bool(forKey: "invert")
         let stored = d.double(forKey: "warningThreshold")
         warningThreshold = stored > 0 ? stored : 85
+        highlightPeak = d.object(forKey: "highlightPeak") == nil ? true : d.bool(forKey: "highlightPeak")
     }
 
     private func savePrefs() {
         let d = UserDefaults.standard
         d.set(invert, forKey: "invert")
         d.set(warningThreshold, forKey: "warningThreshold")
+        d.set(highlightPeak, forKey: "highlightPeak")
     }
 
     // MARK: - Helpers

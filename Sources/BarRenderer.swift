@@ -12,15 +12,17 @@ struct BarRenderer {
     static let barGap: CGFloat    = 3.0
     static let barCorner: CGFloat = 1.5
 
-    // Progress colors — semantic (orange = normal, red = danger)
+    // Progress colors — semantic (orange = normal, red = danger, violet = peak)
     static let colorOrange = NSColor(srgbRed: 0.773, green: 0.420, blue: 0.310, alpha: 1.0)  // #C56B4F
     static let colorRed    = NSColor(srgbRed: 1.00, green: 0.30, blue: 0.25, alpha: 1.0)     // #FF4D40
+    static let colorViolet = NSColor(srgbRed: 0.659, green: 0.333, blue: 0.969, alpha: 1.0)  // #A855F7
     // Track / unauth — bars need a visible track so both rows are always
     // readable even at 0% (otherwise an empty bar disappears entirely).
     static let colorDim    = NSColor(white: 1.0, alpha: 0.45)
     static let colorUnauth = NSColor(white: 1.0, alpha: 0.55)
 
-    static func colorForUsage(_ pct: Double, threshold: Double) -> NSColor {
+    static func colorForUsage(_ pct: Double, threshold: Double, peak: Bool = false) -> NSColor {
+        if peak { return colorViolet }
         if pct >= threshold { return colorRed }
         return colorOrange
     }
@@ -30,7 +32,8 @@ struct BarRenderer {
         sessionPct: Double,
         weeklyPct: Double,
         invert: Bool = false,
-        warningThreshold: Double
+        warningThreshold: Double,
+        peakActive: Bool = false
     ) -> NSImage {
         return renderImage(width: imageWidth) { ctx in
             let stackH = barHeight * 2 + barGap
@@ -41,11 +44,11 @@ struct BarRenderer {
             drawProgressBar(ctx: ctx, x: x, y: topY,
                             pct: sessionPct, invert: invert,
                             trackColor: colorDim,
-                            progressColor: colorForUsage(sessionPct, threshold: warningThreshold))
+                            progressColor: colorForUsage(sessionPct, threshold: warningThreshold, peak: peakActive))
             drawProgressBar(ctx: ctx, x: x, y: bottomY,
                             pct: weeklyPct, invert: invert,
                             trackColor: colorDim,
-                            progressColor: colorForUsage(weeklyPct, threshold: warningThreshold))
+                            progressColor: colorForUsage(weeklyPct, threshold: warningThreshold, peak: peakActive))
         }
     }
 
@@ -98,6 +101,7 @@ struct BarRenderer {
         private let pctLabel: NSTextField
         private var actualPct: Double = 0
         private var invert: Bool = false
+        private var peakActive: Bool = false
 
         init(title: String) {
             titleLabel = NSTextField(labelWithString: title)
@@ -128,10 +132,11 @@ struct BarRenderer {
 
         private var warningThreshold: Double = 85
 
-        func update(percentage: Double, invert: Bool, warningThreshold: Double) {
+        func update(percentage: Double, invert: Bool, warningThreshold: Double, peakActive: Bool = false) {
             self.actualPct = max(0, min(100, percentage))
             self.invert = invert
             self.warningThreshold = warningThreshold
+            self.peakActive = peakActive
             let shown = invert ? 100 - self.actualPct : self.actualPct
             pctLabel.stringValue = "\(Int(shown.rounded()))%"
             needsDisplay = true
@@ -155,7 +160,7 @@ struct BarRenderer {
             let shown = invert ? 100 - actualPct : actualPct
             let fillW = barW * CGFloat(shown / 100.0)
             if fillW > 0.5 {
-                (actualPct >= warningThreshold ? colorRed : colorOrange).setFill()
+                (peakActive ? colorViolet : (actualPct >= warningThreshold ? colorRed : colorOrange)).setFill()
                 NSBezierPath(roundedRect: NSRect(x: barX, y: barY, width: fillW, height: barH),
                              xRadius: r, yRadius: r).fill()
             }
