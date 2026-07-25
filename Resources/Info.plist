@@ -7,7 +7,7 @@
     <key>CFBundleDisplayName</key>
     <string>Claude Usage Bar</string>
     <key>CFBundleIdentifier</key>
-    <string>com.github.claude-usage-toolbar</string>
+    <string>online.sian-agency.usagebar</string>
     <key>CFBundleVersion</key>
     <string>1.0.0</string>
     <key>CFBundleShortVersionString</key>

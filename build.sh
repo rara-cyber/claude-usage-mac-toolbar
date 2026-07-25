@@ -39,7 +39,6 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
 mv "$BINARY" "$APP/Contents/MacOS/"
 cp Resources/Info.plist "$APP/Contents/"
-cp Resources/icon.png "$APP/Contents/Resources/"
 
 # Sign with a real code-signing identity if one exists, so the macOS Keychain
 # "Always Allow" grant persists across launches and rebuilds. Ad-hoc / linker

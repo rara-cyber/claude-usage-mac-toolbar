@@ -6,7 +6,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pollTimer: Timer?
     private let client = UsageClient()
     private var lastUsage: UsageData?
-    private var logo: NSImage?
 
     // Preferences
     private var invert: Bool = false
@@ -31,7 +30,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         loadPrefs()
-        loadLogo()
 
         // Create status item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -141,32 +139,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pollTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             self?.poll()
         }
-    }
-
-    // MARK: - Logo
-
-    private func loadLogo() {
-        // Try bundle Resources first, then next to executable
-        let candidates = [
-            Bundle.main.path(forResource: "icon", ofType: "png"),
-            Bundle.main.path(forResource: "claude-logo", ofType: "png"),
-            executableRelativePath("icon.png"),
-            executableRelativePath("../Resources/icon.png"),
-            executableRelativePath("claude-logo.png"),
-        ]
-
-        for path in candidates {
-            if let path = path, FileManager.default.fileExists(atPath: path),
-               let img = NSImage(contentsOfFile: path) {
-                logo = img
-                return
-            }
-        }
-    }
-
-    private func executableRelativePath(_ relative: String) -> String? {
-        guard let execURL = Bundle.main.executableURL else { return nil }
-        return execURL.deletingLastPathComponent().appendingPathComponent(relative).path
     }
 
     // MARK: - Status bar rendering
@@ -421,7 +393,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         addBody("""
             Everything stays on your computer. Usage history is saved to:\n\
             ~/Library/Application Support/ClaudeUsageBar/usage_history.json\n\n\
-            Preferences (display mode, active view) are stored in the standard \
+            Preferences (used/remaining, warning threshold, peak highlighting) \
+            are stored in the standard \
             macOS UserDefaults. No data is sent to any server — the only network \
             request is the usage API call to api.anthropic.com.
             """)

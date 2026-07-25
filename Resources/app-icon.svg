@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-labelledby="t d">
+  <title id="t">Claude Usage Bar</title>
+  <desc id="d">Two stacked progress bars on a dark rounded square</desc>
+
+  <!-- macOS Big Sur icon grid: 824x824 squircle centred in a 1024 canvas -->
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="#121418"/>
+
+  <!-- Session (top) and Weekly (bottom) bars — the same motif the app draws
+       in the menu bar. Track at low opacity so an empty bar stays visible. -->
+  <g transform="translate(232 380)">
+    <!-- top: track + 68% fill -->
+    <rect width="560" height="110" rx="55" fill="#CBD5E0" opacity="0.16"/>
+    <rect width="381" height="110" rx="55" fill="#1AE392"/>
+    <!-- bottom: track + 41% fill -->
+    <rect y="154" width="560" height="110" rx="55" fill="#CBD5E0" opacity="0.16"/>
+    <rect y="154" width="230" height="110" rx="55" fill="#1AE392"/>
+  </g>
+</svg>
