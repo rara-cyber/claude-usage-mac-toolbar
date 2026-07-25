@@ -10,9 +10,9 @@
   <g transform="translate(232 380)">
     <!-- top: track + 68% fill -->
     <rect width="560" height="110" rx="55" fill="#CBD5E0" opacity="0.16"/>
-    <rect width="381" height="110" rx="55" fill="#1AE392"/>
+    <rect width="381" height="110" rx="55" fill="#C56B4F"/>
     <!-- bottom: track + 41% fill -->
     <rect y="154" width="560" height="110" rx="55" fill="#CBD5E0" opacity="0.16"/>
-    <rect y="154" width="230" height="110" rx="55" fill="#1AE392"/>
+    <rect y="154" width="230" height="110" rx="55" fill="#C56B4F"/>
   </g>
 </svg>
